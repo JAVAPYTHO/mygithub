@@ -32,6 +32,13 @@ tmp/
 outputs/**
 !outputs/.gitkeep
 
+# README展示图白名单
+!outputs/figures/
+!outputs/figures/active_days_distribution_mysql.png
+!outputs/figures/buy_ratio_distribution_mysql.png
+!outputs/figures/active_days_vs_buy_ratio_boxplot_mysql.png
+!outputs/figures/pairplot_features_mysql.png
+
 # Optional: keep docs/demo assets if needed
 # docs/assets/**
 
