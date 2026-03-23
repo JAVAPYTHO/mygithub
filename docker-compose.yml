@@ -1,0 +1,403 @@
+name: bigdata-stack
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    environment:
+      - CLUSTER_NAME=bigdata-cluster
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+    ports:
+      - "9870:9870"
+      - "9000:9000"
+    volumes:
+      - namenode:/hadoop/dfs/name
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["hadoop", "all"]
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - HDFS_CONF_dfs_replication=1
+    ports:
+      - "9864:9864"
+    volumes:
+      - datanode:/hadoop/dfs/data
+    depends_on:
+      - namenode
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["hadoop", "all"]
+
+  resourcemanager:
+    image: bde2020/hadoop-resourcemanager:2.0.0-hadoop3.2.1-java8
+    container_name: resourcemanager
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - YARN_CONF_yarn_resourcemanager_hostname=resourcemanager
+    ports:
+      - "8088:8088"
+    depends_on:
+      - namenode
+      - datanode
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["hadoop", "all"]
+
+  nodemanager:
+    image: bde2020/hadoop-nodemanager:2.0.0-hadoop3.2.1-java8
+    container_name: nodemanager
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - YARN_CONF_yarn_resourcemanager_hostname=resourcemanager
+    depends_on:
+      - resourcemanager
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["hadoop", "all"]
+
+  historyserver:
+    image: bde2020/hadoop-historyserver:2.0.0-hadoop3.2.1-java8
+    container_name: historyserver
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+    ports:
+      - "8188:8188"
+    depends_on:
+      - namenode
+      - datanode
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["hadoop", "all"]
+
+  spark-master:
+    image: apache/spark:3.5.1
+    container_name: spark-master
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master", "--port", "7077", "--webui-port", "8080"]
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/8080'"]
+      interval: 20s
+      timeout: 5s
+      retries: 15
+      start_period: 40s
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["spark", "all"]
+
+  spark-worker:
+    image: apache/spark:3.5.1
+    container_name: spark-worker
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077", "--webui-port", "8081"]
+    ports:
+      - "8081:8081"
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/8081'"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["spark", "all"]
+
+  mysql:
+    image: mysql:8.0
+    container_name: hive-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=hive
+      - MYSQL_DATABASE=metastore
+      - MYSQL_USER=hive
+      - MYSQL_PASSWORD=hive
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql:/var/lib/mysql
+    networks:
+      - bigdata
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-phive"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *default-logging
+    profiles: ["hive", "all"]
+
+  hive-metastore:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: hive-metastore
+    environment:
+      - HIVE_METASTORE_DB_TYPE=mysql
+      - HIVE_METASTORE_DB_HOSTNAME=mysql
+      - HIVE_METASTORE_DB_NAME=metastore
+      - HIVE_METASTORE_DB_USERNAME=hive
+      - HIVE_METASTORE_DB_PASSWORD=hive
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+    ports:
+      - "9083:9083"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      namenode:
+        condition: service_started
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["hive", "all"]
+
+  hive-server:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: hive-server
+    environment:
+      - HIVE_CORE_CONF_javax_jdo_option_ConnectionURL=jdbc:mysql://mysql:3306/metastore?createDatabaseIfNotExist=true
+      - HIVE_CORE_CONF_javax_jdo_option_ConnectionDriverName=com.mysql.cj.jdbc.Driver
+      - HIVE_CORE_CONF_javax_jdo_option_ConnectionUserName=hive
+      - HIVE_CORE_CONF_javax_jdo_option_ConnectionPassword=hive
+      - HIVE_SITE_CONF_hive_metastore_uris=thrift://hive-metastore:9083
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+    ports:
+      - "10000:10000"
+    depends_on:
+      hive-metastore:
+        condition: service_started
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["hive", "all"]
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+      - ZOOKEEPER_TICK_TIME=2000
+    ports:
+      - "2181:2181"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/2181'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["kafka", "storm", "all"]
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+    ports:
+      - "9092:9092"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/9092'"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["kafka", "all"]
+
+  flink-jobmanager:
+    image: flink:1.18.1-scala_2.12-java11
+    container_name: flink-jobmanager
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+    ports:
+      - "8082:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/8081'"]
+      interval: 20s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["flink", "all"]
+
+  flink-taskmanager:
+    image: flink:1.18.1-scala_2.12-java11
+    container_name: flink-taskmanager
+    command: taskmanager
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 2
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'jps | grep -q TaskManagerRunner'"]
+      interval: 20s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["flink", "all"]
+
+  flume:
+    image: probablyfine/flume:latest
+    container_name: flume
+    environment:
+      - FLUME_AGENT_NAME=agent1
+      - FLUME_CONF_FILE=/opt/flume-config/kafka-hdfs.conf
+      - FLUME_OPTS=-Dflume.root.logger=INFO,console
+    volumes:
+      - ./flume/conf:/opt/flume-config:ro
+    ports:
+      - "41414:41414"
+      - "44444:44444"
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["hadoop", "flume", "all"]
+
+  storm-nimbus:
+    image: storm:2.6.1
+    container_name: storm-nimbus
+    command: ["storm", "nimbus"]
+    environment:
+      - STORM_ZOOKEEPER_SERVERS=["zookeeper"]
+      - STORM_NIMBUS_SEEDS=["storm-nimbus"]
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "6627:6627"
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["storm", "all"]
+
+  storm-supervisor:
+    image: storm:2.6.1
+    container_name: storm-supervisor
+    command: ["storm", "supervisor"]
+    environment:
+      - STORM_ZOOKEEPER_SERVERS=["zookeeper"]
+      - STORM_NIMBUS_SEEDS=["storm-nimbus"]
+    depends_on:
+      - storm-nimbus
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["storm", "all"]
+
+  storm-ui:
+    image: storm:2.6.1
+    container_name: storm-ui
+    command: ["storm", "ui"]
+    environment:
+      - STORM_ZOOKEEPER_SERVERS=["zookeeper"]
+      - STORM_NIMBUS_SEEDS=["storm-nimbus"]
+    depends_on:
+      - storm-nimbus
+    ports:
+      - "8083:8080"
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["storm", "all"]
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: clickhouse
+    ports:
+      - "8123:8123"
+      - "9001:9000"
+    volumes:
+      - clickhouse:/var/lib/clickhouse
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["olap", "all"]
+
+  elasticsearch:
+    image: bitnami/elasticsearch:8.14.3
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ELASTICSEARCH_HEAP_SIZE=512m
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch:/bitnami/elasticsearch/data
+    networks:
+      - bigdata
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["search", "all"]
+
+volumes:
+  namenode:
+  datanode:
+  mysql:
+  clickhouse:
+  elasticsearch:
+
+networks:
+  bigdata:
+    driver: bridge

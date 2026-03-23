@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual env
+.venv/
+venv/
+bigdata_env/
+
+# IDE
+.vscode/
+.idea/
+.cursor/
+.specstory/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime / temp
+tmp/
+*.log
+
+# Data outputs (generated)
+outputs/**
+!outputs/.gitkeep
+
+# Optional: keep docs/demo assets if needed
+# docs/assets/**
+
+# Spark / Hadoop temp
+metastore_db/
+spark-warehouse/
+
+# Local env files
+.env
+.env.local
