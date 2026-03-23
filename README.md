@@ -112,6 +112,18 @@ flowchart TD
   F --> G
   G --> H[可视化 user_behavior_visualizer.py]
   H --> I[outputs/figures]
+
+  classDef source fill:#E3F2FD,stroke:#1E88E5,color:#0D47A1,stroke-width:2px;
+  classDef process fill:#E8F5E9,stroke:#43A047,color:#1B5E20,stroke-width:2px;
+  classDef analysis fill:#FFF3E0,stroke:#FB8C00,color:#E65100,stroke-width:2px;
+  classDef storage fill:#F3E5F5,stroke:#8E24AA,color:#4A148C,stroke-width:2px;
+  classDef output fill:#FCE4EC,stroke:#D81B60,color:#880E4F,stroke-width:2px;
+
+  class A source;
+  class B,C process;
+  class D,G,H analysis;
+  class E,F storage;
+  class I output;
 ```
 
 分步命令：
